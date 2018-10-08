@@ -1,4 +1,3 @@
-
 // Chat is a server that lets clients chat with each other.
 package main
 
@@ -14,28 +13,45 @@ import (
 func main() {
 	// ask user for idle time disconnect in seconds/pass to handleConnection
 	idleDisconnectTime := getConnectionTimeLimit()
-	fmt.Println(idleDisconnectTime)
 
 	// listens for incoming connections
 	listener, err := net.Listen("tcp", "localhost:8000")
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	/*// listens for incoming connections
+	listener2, err := net.Listen("tcp", "localhost:8001")
+	if err != nil {
+		log.Fatal(err)
+	}*/
 	// -------------
 	go broadcaster()
 	// -------------
-	// infinite loop
+	// handle connections from localhost:8000
+
 	for {
-		// blocks until an incoming connection request is made
-		// when a connection is established, a connection object is created
-		conn, err := listener.Accept()	// **blocking function**
+		conn, err := listener.Accept() // **blocking function**
 		if err != nil {
 			log.Print(err)
 			continue
 		}
-		// a handleConn() goroutine is created for each established connection
 		go handleConnection(conn, idleDisconnectTime)
 	}
+
+	/*// handle connections from localhost:8001
+	go func() {
+		for {
+			conn2, err := listener2.Accept()	// **blocking function**
+			if err != nil {
+				log.Print(err)
+				continue
+			}
+			// a handleConn2() goroutine is created for each established connection
+			go handleConnection2(conn2)
+		}
+	}()*/
+
 }
 
 //!-main
@@ -46,22 +62,33 @@ func main() {
 // the only information carried by 'client' is the outgoing message
 type client struct {
 	msgChannel chan<- string
-	userName string
+	userName   string
 }
-
 
 // global vars (only variables shared by all concurrent goroutines) *also network connections*
 var (
-	entering = make(chan client)
-	leaving  = make(chan client)
-	globalMessages = make(chan string) // all incoming client messages
-
+	entering        = make(chan client)
+	leaving         = make(chan client)
+	globalMessages  = make(chan string) // all incoming client messages
+	plotDataStrings = make(chan int)
 )
 
 func broadcaster() {
 	// all connected clients
 	// this map is confined to the broadcaster goroutine
 	listOfActiveClients := make(map[client]bool)
+	// send number of keys in listOfActiveClients to plotData channel each second
+	ticker := time.NewTicker(1 * time.Second)
+	go func() {
+		for range ticker.C {
+			plotDataStrings <- len(listOfActiveClients)
+		}
+	}()
+	go func() {
+		for {
+			fmt.Printf("%d %s\n", <-plotDataStrings, "current users")
+		}
+	}()
 
 	// clientTimeLimit :=
 	// infinite loop
@@ -85,6 +112,9 @@ func broadcaster() {
 
 		case ActiveClient := <-leaving:
 			delete(listOfActiveClients, ActiveClient)
+
+			ActiveClient.msgChannel <- " "
+
 			close(ActiveClient.msgChannel)
 		}
 	}
@@ -114,7 +144,7 @@ func handleConnection(conn net.Conn, disconnectTime int) {
 	go monitorTimerDisconnect(conn, timer, newClient)
 
 	input := bufio.NewScanner(conn)
-	for input.Scan() {	// **blocking function**
+	for input.Scan() { // **blocking function**
 		globalMessages <- who + ": " + input.Text()
 		timer.Reset(time.Duration(disconnectTime) * time.Second)
 	}
@@ -127,6 +157,15 @@ func handleConnection(conn net.Conn, disconnectTime int) {
 		conn.Close()
 	}
 }
+
+/*func handleConnection2(conn net.Conn) {
+	// writes user quantity in real time to the connection via channel
+	go clientWriter(conn, plotDataStrings)
+	// this code will never be reached unless the client is forcibly interrupted
+	if !connectionIsClosed(conn) {
+		conn.Close()
+	}
+}*/
 
 func clientWriter(conn net.Conn, ch <-chan string) {
 	for msg := range ch {
@@ -141,11 +180,11 @@ func clientWriter(conn net.Conn, ch <-chan string) {
 func getUserName(conn net.Conn) string {
 	//reading a string
 	reader := bufio.NewReader(conn)
-	fmt.Fprint(conn,"Enter a user name: ")
+	fmt.Fprint(conn, "Enter a user name: ")
 	// 0x0a is the byte value for <\n>
 	userName, _ := reader.ReadBytes(0x0a)
 	// strip newline char from end of username
-	cleanUserName := userName[:(len(userName)-1)]
+	cleanUserName := userName[:(len(userName) - 1)]
 	// cast bytes as string
 	return string(cleanUserName)
 }
@@ -162,9 +201,9 @@ func getConnectionTimeLimit() int {
 	fmt.Println("Enter connection time limit (seconds): ")
 	var timeLimit int
 	_, err := fmt.Scanf("%d", &timeLimit)
-		if err != nil {
-			log.Print(err)
-		}
+	if err != nil {
+		log.Print(err)
+	}
 	return timeLimit
 }
 
@@ -183,4 +222,3 @@ func connectionIsClosed(conn net.Conn) bool {
 	}
 	return false
 }
-
